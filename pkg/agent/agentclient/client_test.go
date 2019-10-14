@@ -3,8 +3,10 @@ package agentclient
 import (
 	"errors"
 	"fmt"
+	"math/rand"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -15,6 +17,8 @@ import (
 )
 
 func TestServeData_HTTP(t *testing.T) {
+	os.Args[1] = "--v=9"
+	klog.InitFlags(nil)
 	var err error
 	var stream agent.AgentService_ConnectClient
 	client := &AgentClient{
@@ -27,6 +31,7 @@ func TestServeData_HTTP(t *testing.T) {
 	go client.Serve(stopCh)
 	defer close(stopCh)
 
+	time.Sleep(time.Second * 3)
 	// Start test http server as remote service
 	expectedBody := "Hello, client"
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -36,15 +41,21 @@ func TestServeData_HTTP(t *testing.T) {
 
 	// Stimulate sending KAS DIAL_REQ to AgentClient
 	dialPacket := newDialPacket("tcp", ts.URL[len("http://"):], 111)
+	klog.Infof("Sending packet %+v", dialPacket)
 	err = stream.Send(dialPacket)
 	if err != nil {
-		t.Error(err.Error())
+		t.Fatal(err.Error())
 	}
+	time.Sleep(time.Second * 3)
 
 	// Expect receiving DIAL_RSP packet from AgentClient
-	pkg, _ := stream.Recv()
+	klog.Info("Going to receive")
+	pkg, err := stream.Recv()
+	if err != nil {
+		t.Fatal(err.Error())
+	}
 	if pkg == nil {
-		t.Error("unexpected nil packet")
+		t.Fatal("unexpected nil packet")
 	}
 	if pkg.Type != agent.PacketType_DIAL_RSP {
 		t.Errorf("expect PacketType_DIAL_RSP; got %v", pkg.Type)
@@ -135,7 +146,7 @@ func TestClose_Client(t *testing.T) {
 	// Expect receiving DIAL_RSP packet from AgentClient
 	pkg, _ := stream.Recv()
 	if pkg == nil {
-		t.Error("unexpected nil packet")
+		t.Fatal("unexpected nil packet")
 	}
 	if pkg.Type != agent.PacketType_DIAL_RSP {
 		t.Errorf("expect PacketType_DIAL_RSP; got %v", pkg.Type)
@@ -197,7 +208,7 @@ type fakeStream struct {
 }
 
 func pipe() (agent.AgentService_ConnectClient, agent.AgentService_ConnectClient) {
-	r, w := make(chan *agent.Packet, 2), make(chan *agent.Packet, 2)
+	r, w := make(chan *agent.Packet), make(chan *agent.Packet)
 	s1, s2 := &fakeStream{}, &fakeStream{}
 	s1.r, s1.w = r, w
 	s2.r, s2.w = w, r
@@ -216,9 +227,13 @@ func (s *fakeStream) Send(packet *agent.Packet) error {
 }
 
 func (s *fakeStream) Recv() (*agent.Packet, error) {
+	var pkg *agent.Packet
+	rand.Seed(time.Now().UnixNano())
+	a := rand.Intn(100)
+	klog.Infof("Receiving %d", a)
 	select {
-	case pkg := <-s.r:
-		klog.Infof("[DEBUG] recv packet %+v", pkg)
+	case pkg = <-s.r:
+		klog.Infof("[DEBUG] recv packet %d %+v", a, pkg)
 		return pkg, nil
 	case <-time.After(5 * time.Second):
 		return nil, errors.New("timeout recv")

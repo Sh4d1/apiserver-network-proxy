@@ -84,10 +84,16 @@ func (a *AgentClient) Serve(stopCh <-chan struct{}) {
 		default:
 		}
 
+		klog.Info("Will receive")
 		pkt, err := a.stream.Recv()
+		klog.Infof("Received %+v", pkt)
 		if err != nil {
+			klog.Warningf("errrrrrrrr")
 			if err2, ok := err.(*ReconnectError); ok {
-				err = err2.Wait()
+				err3 := err2.Wait()
+				if err3 != nil {
+					klog.Warningf("reconnect error: %v", err3)
+				}
 				continue
 			} else if err == io.EOF {
 				klog.Info("received EOF, exit")
@@ -101,6 +107,11 @@ func (a *AgentClient) Serve(stopCh <-chan struct{}) {
 		}
 
 		klog.Infof("[tracing] recv packet %+v", pkt)
+
+		if pkt == nil {
+			klog.Warningf("empty packet received")
+			continue
+		}
 
 		switch pkt.Type {
 		case agent.PacketType_DIAL_REQ:
